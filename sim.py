@@ -206,8 +206,48 @@ class FOO(Level):
         return "Status: {}. FOO has {} misses implied by aggregate cost (lower bound), while worst-case (miss any taken tail) it has {} misses out of a total of {} accesses".format(result_to_str(self.solved, self.result), self.compulsory + self.solved.OptimalCost() / scaling, self.misses, len(self.accesses))
 
 class RRIPLevel(Level):
-    def __init__(self, size):
+    def __init__(self, size, bits):
         super().__init__(size)
+        self.state = []
+        self.bits = bits
+        self.order = 0 #to keep order within a priority level
+
+    def __str__(self):
+        for i in range(len(self.state)):
+            print(self.state[i][0], self.state[i][1], self.state[i][2].data)
+
+    # write to the queue
+    def push(self, access):
+        if(len(self.state)) >= self.size:
+            self.evict()
+        priority = 0
+        hq.heappush(self.state, [priority, self.order, access])
+        self.order += 1
+        super().push(access)
+
+    def increment(self, access, priority):
+        if priority < (2**self.bits) - 1:
+            priority += 1
+        # else, already the highest priority
+        hq.heappush(self.state, [priority, self.order, access])
+        self.order += 1
+
+    # evict from queue if queue is full
+    def evict(self):
+        a = hq.heappop(self.state)
+
+    # get this element from the cache
+    def get_element(self, access):
+        for i in range (len(self.state)):
+            if self.state[i][2] == access:
+                # cache hit
+                self.hits += 1
+                element = self.state.pop(i)
+                self.increment(element[2], element[0])
+                return
+        # cache miss
+        self.misses += 1
+        self.push(access)
 
 import unittest as ut
 
@@ -245,6 +285,15 @@ class TestSamples(ut.TestCase):
         foo.flush()
         self.assertEqual(foo.hits, 4)
         self.assertEqual(foo.misses, 8)
+
+    def test_rrip(self):
+        rrip = RRIPLevel(3, 2)
+        for access in test_accesses:
+            rrip.push(access)
+        rrip.flush()
+        self.assertEqual(rrip.hits, 2)
+        self.assertEqual(rrip.misses, 8)
+
 
 import argparse as ap
 import csv
