@@ -29,7 +29,7 @@ def result_to_str(flower, result):
 class Access(object):
     def __init__(self, address, size):
         self.address = address
-        # self.size = size # remove this since each access is of size 1 block
+        self.size = 1 # remove this since each access is of size 1 block
 
     def __str__(self):
         return "{} (size {})".format(self.address, self.size)
@@ -100,6 +100,7 @@ class LRU(Level):
                 while self.size - self.current_occupation < access.size:
                     assert(len(self.state) > 0)
                     oldquanta, oldaccess = hq.heappop(self.state)
+                    opcode = [("DEL", oldaccess, dev_level)]
                     self.current_occupation -= oldaccess.size
                 hq.heappush(self.state, [self.quanta, access])
                 self.current_occupation += access.size
@@ -323,6 +324,13 @@ if __name__ == "__main__":
         print("Simulating from {}".format(source))
         # csv: r/w? address / file ID (arbitrary), size, (offset?)
         # we're just going to ship posix calls
+        with open(source) as f:
+            data = f.read()
+            if data[0:9] == "*** mlfs ":
+                remaining = data[9:]
+                if remaining[:4] == "open":
+
+
 
 
 
