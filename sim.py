@@ -29,7 +29,7 @@ def result_to_str(flower, result):
 class Access(object):
     def __init__(self, address, size):
         self.address = address
-        self.size = size
+        self.size = size # remove this since each access is of size 1 block
 
     def __str__(self):
         return "{} (size {})".format(self.address, self.size)
@@ -213,17 +213,32 @@ class RRIPLevel(Level):
         self.order = 0 #to keep order within a priority level
 
     def __str__(self):
+        print("RRIP cache with size {} and bits {}".format(self.size, self.bits))
+    
+    def print_state(self):
         for i in range(len(self.state)):
-            print(self.state[i][0], self.state[i][1], self.state[i][2].data)
+            print(self.state[i][0], self.state[i][1], self.state[i][2])
+        
+    def get_current_util(self):
+        return len(self.state)
 
-    # write to the queue
+    # access the element in cache
     def push(self, access):
-        if(len(self.state)) >= self.size:
-            self.evict()
+        for i in range (len(self.state)):
+            if self.state[i][2] == access:
+                # cache hit
+                self.hits += 1
+                element = self.state.pop(i)
+                self.increment(element[2], element[0])
+                return None
+        # cache miss
+        self.misses += 1
+        if(len(self.state)) >= self.size: #cache is full. Go to next level
+            elem = self.evict()
+            super().push(elem)
         priority = 0
         hq.heappush(self.state, [priority, self.order, access])
         self.order += 1
-        super().push(access)
 
     def increment(self, access, priority):
         if priority < (2**self.bits) - 1:
@@ -234,20 +249,8 @@ class RRIPLevel(Level):
 
     # evict from queue if queue is full
     def evict(self):
-        a = hq.heappop(self.state)
-
-    # get this element from the cache
-    def get_element(self, access):
-        for i in range (len(self.state)):
-            if self.state[i][2] == access:
-                # cache hit
-                self.hits += 1
-                element = self.state.pop(i)
-                self.increment(element[2], element[0])
-                return
-        # cache miss
-        self.misses += 1
-        self.push(access)
+        elem = hq.heappop(self.state)
+        return elem
 
 import unittest as ut
 
@@ -287,11 +290,11 @@ class TestSamples(ut.TestCase):
         self.assertEqual(foo.misses, 8)
 
     def test_rrip(self):
-        rrip = RRIPLevel(3, 2)
+        rrip = RRIPLevel(3, 2) #size, number of bits
         for access in test_accesses:
             rrip.push(access)
         rrip.flush()
-        self.assertEqual(rrip.hits, 2)
+        self.assertEqual(rrip.hits, 4)
         self.assertEqual(rrip.misses, 8)
 
 
