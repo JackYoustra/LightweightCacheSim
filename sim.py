@@ -205,12 +205,11 @@ class FOO(Level):
             return "Graph was infeasible"
         return "Status: {}. FOO has {} misses implied by aggregate cost (lower bound), while worst-case (miss any taken tail) it has {} misses out of a total of {} accesses".format(result_to_str(self.solved, self.result), self.compulsory + self.solved.OptimalCost() / scaling, self.misses, len(self.accesses))
 
-class RRIPLevel(Level):
-    def __init__(self, size, bits):
+class SRRIPLevel(Level):
+    def __init__(self, size, levels):
         super().__init__(size)
         self.state = []
-        self.bits = bits
-        self.order = 0 #to keep order within a priority level
+        self.levels = levels
 
     def __str__(self):
         for i in range(len(self.state)):
@@ -218,36 +217,10 @@ class RRIPLevel(Level):
 
     # write to the queue
     def push(self, access):
-        if(len(self.state)) >= self.size:
-            self.evict()
-        priority = 0
-        hq.heappush(self.state, [priority, self.order, access])
-        self.order += 1
+        # We only support single sizes atm
+        assert(access.size == 1)
+        if 
         super().push(access)
-
-    def increment(self, access, priority):
-        if priority < (2**self.bits) - 1:
-            priority += 1
-        # else, already the highest priority
-        hq.heappush(self.state, [priority, self.order, access])
-        self.order += 1
-
-    # evict from queue if queue is full
-    def evict(self):
-        a = hq.heappop(self.state)
-
-    # get this element from the cache
-    def get_element(self, access):
-        for i in range (len(self.state)):
-            if self.state[i][2] == access:
-                # cache hit
-                self.hits += 1
-                element = self.state.pop(i)
-                self.increment(element[2], element[0])
-                return
-        # cache miss
-        self.misses += 1
-        self.push(access)
 
 import unittest as ut
 
@@ -309,6 +282,7 @@ if __name__ == "__main__":
         source = args.source
         print("Simulating from {}".format(source))
         # csv: r/w? address / file ID (arbitrary), size, (offset?)
+        # we're just going to ship posix calls
 
 
 
