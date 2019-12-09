@@ -29,7 +29,7 @@ def result_to_str(flower, result):
 class Access(object):
     def __init__(self, address, size):
         self.address = address
-        self.size = size # remove this since each access is of size 1 block
+        # self.size = size # remove this since each access is of size 1 block
 
     def __str__(self):
         return "{} (size {})".format(self.address, self.size)
@@ -65,6 +65,9 @@ class Level(object):
 
     def __str__(self):
         return " of size {} got {} hits and {} misses".format(self.size, self.hits, self.misses)
+
+    def delete_access(self, access):
+        raise NotImplementedError
 
 import heapq as hq
 
@@ -254,10 +257,15 @@ class RRIPLevel(Level):
     def evict(self):
         elem = hq.heappop(self.state)
         return elem
+    
+    def delete_access(self, access):
+        self.state.remove(access)
+        return
 
 import unittest as ut
 
 # taken from https://arxiv.org/pdf/1711.03709.pdf
+# change test samples to remove size from Access objects
 test_samples = (
         (0xA, 3),
         (0xB, 1),
