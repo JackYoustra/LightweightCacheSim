@@ -54,10 +54,10 @@ class Level(object):
         self.size = size
         pass
 
-    def push(self, access):
+    def push(self, access, dev_level):
         if self.child == None:
-            return
-        self.child.push(access)
+            return None
+        return self.child.push(access, dev_level)
 
     def flush(self):
         if self.child != None:
@@ -223,7 +223,7 @@ class RRIPLevel(Level):
         return len(self.state)
 
     # access the element in cache
-    def push(self, access):
+    def push(self, access, dev_level):
         for i in range (len(self.state)):
             if self.state[i][2] == access:
                 # cache hit
@@ -235,10 +235,13 @@ class RRIPLevel(Level):
         self.misses += 1
         if(len(self.state)) >= self.size: #cache is full. Go to next level
             elem = self.evict()
-            super().push(elem)
+            opcode = [("DEL", elem, dev_level)]
+            opcode.append(super().push(elem, dev_level+1))
         priority = 0
         hq.heappush(self.state, [priority, self.order, access])
+        opcode.append(["ADD", access, dev_level])
         self.order += 1
+        return opcode
 
     def increment(self, access, priority):
         if priority < (2**self.bits) - 1:
