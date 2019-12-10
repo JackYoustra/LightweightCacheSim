@@ -79,7 +79,6 @@ class Strata(object):
         for i in range(size_b, start_b):
             dev_level = 1 #NVM
             access = Access()
-            print(Access())
             self.device[1].push(access, inode_num, i) #change inode mappings if migration(s) happen
             #self.inode.add_block_addr(inode_num, i, access, dev_level)
 
@@ -91,7 +90,6 @@ class Strata(object):
                 #self.device[dev_level].delete_access(access)
                 dev_level = 1 #NVM
                 access = Access()
-                print(access)
                 self.device[1].push(access, inode_num, i) # push file inum + block offset (file's perspective)
                 #self.inode.delete_block_addr(inode_num, i)
                 #self.inode.add_block_addr(inode_num, i, access, dev_level)
@@ -99,7 +97,6 @@ class Strata(object):
         for i in range(size_b, end_b):
             dev_level = 1 #NVM
             access = Access()
-            print(access)
             self.device[1].push(access, inode_num, i) #change inode mappings if migration(s) happen
             #self.inode.add_block_addr(inode_num, i, access, dev_level)
 
@@ -142,7 +139,7 @@ class Inode(object):
     
     # new block added for the file. add its map to inode, using inode_num
     def add_block_addr(self, inum, block_idx, access, dev_level):
-        print("setblockaddr block=", block_idx, "in level", dev_level)
+        #print("setblockaddr block=", block_idx, "in level", dev_level)
         elem = (access, dev_level)
         baddr_list = self.block_addr[inum]
 
@@ -159,12 +156,19 @@ if __name__ == "__main__":
     strata = Strata(4)
     strata.createDevice(1, ["LRU", 1, 3, strata.inode]) # NVM lvlnum, size, inodes
     strata.createDevice(2, ["LRU", 2, 3, strata.inode], ) # SSD
-    strata.device[1].__str__()
-    strata.device[2].__str__()
+    print(strata.device[1].__str__())
+    print(strata.device[2].__str__())
+
+
     f1 = File("filefoo.txt",0)
 
+    print("writing to strata!")
     strata.write(f1, 0, 50000)
 
+    print(strata.device[1].__str__())
+    print(strata.device[2].__str__())
+
+    print("writing to strata!")
     strata.write(f1, 0, 50000)
 
     print(strata.device[1].__str__())

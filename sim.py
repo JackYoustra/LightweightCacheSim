@@ -116,7 +116,7 @@ class LRU(Level):
                     break
             
             if not found:
-                print("not found access=", access, "in level", self.lvlnum)
+                #print("not found access=", access, "in level", self.lvlnum)
                 self.misses += 1
                 super().deleteCopies(access)
 
@@ -126,7 +126,7 @@ class LRU(Level):
                     oldquanta, oldaccess, oldinum, oldblocknum = hq.heappop(self.state)
                     self.current_occupation -= 1
                     # eviction has stateful changes (cascading to deletes + adds)
-                    print("evicting block=", oldblocknum)
+                    #print("evicting block=", oldblocknum)
                     self.inodes.delete_block_addr(oldinum, oldblocknum)
                     super().push(oldaccess, oldinum, oldblocknum)
 
