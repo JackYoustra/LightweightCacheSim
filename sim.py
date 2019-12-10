@@ -25,14 +25,19 @@ def result_to_str(flower, result):
 
 
 # Push + flush architecture
+access_counter = 0
+class Access:
+    def __init__(self, address=None, size=0):
+        if address is None:
+            global access_counter
+            self.address = access_counter
+            access_counter += 1
+        else:
+            self.address = address
 
-class Access(object):
-    def __init__(self, address, size):
-        self.address = address
         # self.size = size # remove this since each access is of size 1 block
-
     def __str__(self):
-        return "{} (size {})".format(self.address, self.size)
+        return "{}".format(self.address)
 
     def __repr__(self):
         return str(self)
@@ -47,17 +52,27 @@ class Access(object):
         return self.address.__hash__()
 
 class Level(object):
-    def __init__(self, size):
+    def __init__(self, lvlnum, size, inodes):
         self.child = None
         self.hits = 0
         self.misses = 0
         self.size = size
+        self.lvlnum = lvlnum
+        self.inodes = inodes
         pass
 
-    def push(self, access, dev_level):
+    def push(self, access, inum=-1, blocknum=-1):
+        if self.child == None:
+            self.inodes.add_block_addr(inum, blocknum, access, self.lvlnum + 1)
+            return None
+        #print("pushing access to child!" + self.child.__str__())
+        return self.child.push(access, inum, blocknum)
+
+    def deleteCopies(self, access):
         if self.child == None:
             return None
-        return self.child.push(access, dev_level)
+        #print("deleting copies in child!" + self.child.__str__())
+        self.child.deleteCopies(access)
 
     def flush(self):
         if self.child != None:
@@ -72,51 +87,75 @@ class Level(object):
 import heapq as hq
 
 class LRU(Level):
-    def __init__(self, size):
-        super().__init__(size)
+    def __init__(self, lvlnum, size, inodes):
+        super().__init__(lvlnum, size, inodes)
         self.state = []
         self.inserted = {}
         self.quanta = 0
         self.current_occupation = 0
 
-    def push(self, access):
+    # from file system perspective, always call lvl 1 push
+    def push(self, access, inum=-1, blocknum=-1):
         self.quanta += 1
         #print("Looking for {} in {}".format(access, self.state))
-        if self.size < access.size:
+        if self.size < 1:
             # don't even attempt to emplace
             self.misses += 1
+            self.inodes.add_block_addr(inum, blocknum, access, self.lvlnum)
         else:
             # do we exist in the heap?
             found = False
+            #print(self.state, access.__str__())
             for i in range(len(self.state)):
                 if self.state[i][1] == access:
                     self.state[i][0] = self.quanta
                     hq.heapify(self.state)
+                    # hit does not change inode table
                     found = True
                     self.hits += 1
                     break
+            
             if not found:
+                print("not found access=", access, "in level", self.lvlnum)
                 self.misses += 1
-                while self.size - self.current_occupation < access.size:
-                    assert(len(self.state) > 0)
-                    oldquanta, oldaccess = hq.heappop(self.state)
-                    self.current_occupation -= oldaccess.size
-                hq.heappush(self.state, [self.quanta, access])
-                self.current_occupation += access.size
+                super().deleteCopies(access)
 
-        super().push(access)
+                while self.size - self.current_occupation < 1:
+                    # miss may change inode table
+                    assert(len(self.state) > 0)
+                    oldquanta, oldaccess, oldinum, oldblocknum = hq.heappop(self.state)
+                    self.current_occupation -= 1
+                    # eviction has stateful changes (cascading to deletes + adds)
+                    print("evicting block=", oldblocknum)
+                    self.inodes.delete_block_addr(oldinum, oldblocknum)
+                    super().push(oldaccess, oldinum, oldblocknum)
+
+                self.inodes.add_block_addr(inum, blocknum, access, self.lvlnum)
+                hq.heappush(self.state, [self.quanta, access, inum, blocknum])
+                self.current_occupation += 1
+
+
+
+    def deleteCopies(self, access):
+        for i in range(len(self.state)):
+            if self.state[i][1] == access:
+                self.state.remove(i)
+                self.current_occupation -= 1
+
+        hq.heapify(self.state)
 
     def __str__(self):
-        return "LRU{}".format(super())
+        return "LRU{}".format(super().__str__())
+
 
 class PFOO_L(Level):
-    def __init__(self, size):
-        super().__init__(size)
+    def __init__(self, lvlnum, size, inodes):
+        super().__init__(lvlnum, size, inodes)
         self.heap = []
 
-    def push(self, access):
+    def push(self, access, inum=-1, blocknum=-1):
         super().push(access)
-        self.heap.append(access.size)
+        self.heap.append(1)
     
     def flush(self):
         super().flush()
@@ -136,14 +175,14 @@ class PFOO_L(Level):
 
 scaling = 2048
 class FOO(Level):
-    def __init__(self, size):
-        super().__init__(size)
+    def __init__(self, lvlnum, size, inodes):
+        super().__init__(lvlnum, size, inodes)
         self.accesses = []
         self.result = None
         self.solved = None
         self.compulsory = 0
 
-    def push(self, access):
+    def push(self, access, inum=-1, blocknum=-1):
         super().push(access)
         self.accesses.append(access)
 
@@ -209,13 +248,16 @@ class FOO(Level):
         return "Status: {}. FOO has {} misses implied by aggregate cost (lower bound), while worst-case (miss any taken tail) it has {} misses out of a total of {} accesses".format(result_to_str(self.solved, self.result), self.compulsory + self.solved.OptimalCost() / scaling, self.misses, len(self.accesses))
 
 class SRRIPLevel(Level):
-    def __init__(self, size, levels):
-        super().__init__(size)
+    def __init__(self, lvlnum, size, inodes, levels):
+        super().__init__(lvlnum, size, inodes)
         self.state = []
-        self.levels = levels
+        self.bits = levels
+        self.order = 0
 
     def __str__(self):
-        print("RRIP cache with size {} and bits {}".format(self.size, self.bits))
+        s = "RRIP cache with size {} and bits {}".format(self.size, self.bits)
+        s += super().__str__()
+        return s
     
     def print_state(self):
         for i in range(len(self.state)):
@@ -225,7 +267,7 @@ class SRRIPLevel(Level):
         return len(self.state)
 
     # access the element in cache
-    def push(self, access, dev_level):
+    def push(self, access, inum=-1, blocknum=-1):
         for i in range (len(self.state)):
             if self.state[i][2] == access:
                 # cache hit
@@ -237,13 +279,21 @@ class SRRIPLevel(Level):
         self.misses += 1
         if(len(self.state)) >= self.size: #cache is full. Go to next level
             elem = self.evict()
-            opcode = [("DEL", elem, dev_level)]
-            opcode.append(super().push(elem, dev_level+1))
+            # opcode = [("DEL", elem, dev_level)]
+            # opcode.append(super().push(elem, dev_level+1))
+            super().push(elem)
         priority = 0
         hq.heappush(self.state, [priority, self.order, access])
-        opcode.append(["ADD", access, dev_level])
+        # opcode.append(["ADD", access, dev_level])
         self.order += 1
-        return opcode
+        return 
+
+    def deleteCopies(self, access):
+        for i in range(len(self.state)):
+            if self.state[i][2] == access:
+                self.state.remove(i)
+
+        hq.heapify(self.state)
 
     def increment(self, access, priority):
         if priority < (2**self.bits) - 1:
