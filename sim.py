@@ -6,7 +6,8 @@
 # L2:  SSD
 # LLC: HDD
 
-from ortools.graph import pywrapgraph
+import itertools as it
+import functools as ft
 
 def result_to_str(flower, result):
     if result == flower.NOT_SOLVED:
@@ -26,7 +27,11 @@ def result_to_str(flower, result):
 
 # Push + flush architecture
 
+@ft.total_ordering
 class Access(object):
+    def __init__(self, address):
+        self.__init__(address, 0)
+
     def __init__(self, address, size):
         self.address = address
         self.size = size
@@ -42,6 +47,9 @@ class Access(object):
         if isinstance(other, Access):
             return self.address == other.address
         return False
+
+    def __lt__(self, other):
+        return self.address < other.address
 
     def __hash__(self):
         return self.address.__hash__()
@@ -82,6 +90,7 @@ class LRU(Level):
         if self.size < access.size:
             # don't even attempt to emplace
             self.misses += 1
+            super().push(access)
         else:
             # do we exist in the heap?
             found = False
@@ -98,10 +107,10 @@ class LRU(Level):
                     assert(len(self.state) > 0)
                     oldquanta, oldaccess = hq.heappop(self.state)
                     self.current_occupation -= oldaccess.size
+                    super().push(access)
                 hq.heappush(self.state, [self.quanta, access])
                 self.current_occupation += access.size
 
-        super().push(access)
 
     def __str__(self):
         return "LRU{}".format(super())
@@ -145,6 +154,7 @@ class FOO(Level):
         self.accesses.append(access)
 
     def flush(self):
+        from ortools.graph import pywrapgraph
         super().flush()
         last_access_dict = {}
         # maintain edge list. First, we're going to do the inner edges
@@ -205,49 +215,60 @@ class FOO(Level):
             return "Graph was infeasible"
         return "Status: {}. FOO has {} misses implied by aggregate cost (lower bound), while worst-case (miss any taken tail) it has {} misses out of a total of {} accesses".format(result_to_str(self.solved, self.result), self.compulsory + self.solved.OptimalCost() / scaling, self.misses, len(self.accesses))
 
-class RRIPLevel(Level):
-    def __init__(self, size, bits):
+class HP_SRRIP(Level):
+    def __init__(self, size, levels):
         super().__init__(size)
-        self.state = []
-        self.bits = bits
-        self.order = 0 #to keep order within a priority level
+        self.state = []  # Tuple: RRIP prio level, Address
+        self.levels = levels
 
     def __str__(self):
         for i in range(len(self.state)):
-            print(self.state[i][0], self.state[i][1], self.state[i][2].data)
+            print(self.state[i][0], self.state[i][1])
 
     # write to the queue
     def push(self, access):
+        assert(access.size == 1)
+        access = access.address
+        # check for hit
+        for i in range(len(self.state)):
+            if self.state[i][1] == access:
+                # hit, RRIP counter to zero
+                self.hits += 1
+                self.state[i][0] = self.levels
+                return
+        # Miss
+        self.misses += 1
         if(len(self.state)) >= self.size:
-            self.evict()
-        priority = 0
-        hq.heappush(self.state, [priority, self.order, access])
-        self.order += 1
+            hq.heapify(self.state)
+            oldaccess, oldprio = hq.heappop(self.state)
+            # increment all by the amount we would've if we found oldprio by faithfully adhearing to algorithm
+            for i in range(len(self.state)):
+                self.state[i][0] -= oldprio
+        hq.heappush(self.state, [1, access])
         super().push(access)
 
-    def increment(self, access, priority):
-        if priority < (2**self.bits) - 1:
-            priority += 1
-        # else, already the highest priority
-        hq.heappush(self.state, [priority, self.order, access])
-        self.order += 1
+import random as rd
+import numpy as np
+def generate_pattern(pattern, start, end, length=None):
+    assert(end - start > 0)
+    if length is None:
+        length = end - start
+    if pattern == "sr" or pattern == "sw":
+        assert(end - start >= length)
+        begin = rd.randint(start, end - length)
+        return [x for x in range(begin, begin + length)]
+    if pattern == "rr" or pattern == "rw":
+        return [rd.randint(start, end) for x in range(length)]
+    if pattern == "zr" or pattern == "zw":
+        a = 5. # shape
+        samples = length
+        assert(end - start >= length)
+        begin = rd.randint(start, end - length)
+        return [begin + length * x for x in np.random.power(a, samples)]
+    assert(False)
 
-    # evict from queue if queue is full
-    def evict(self):
-        a = hq.heappop(self.state)
-
-    # get this element from the cache
-    def get_element(self, access):
-        for i in range (len(self.state)):
-            if self.state[i][2] == access:
-                # cache hit
-                self.hits += 1
-                element = self.state.pop(i)
-                self.increment(element[2], element[0])
-                return
-        # cache miss
-        self.misses += 1
-        self.push(access)
+def generate_access_pattern(pattern, start, end, length=None):
+    return [Access(x, 1) for x in generate_pattern(pattern, start, end, length)]
 
 import unittest as ut
 
@@ -287,28 +308,74 @@ class TestSamples(ut.TestCase):
         self.assertEqual(foo.misses, 8)
 
     def test_rrip(self):
-        rrip = RRIPLevel(3, 2)
-        for access in test_accesses:
+        list = [1, 2, 2, 1, 3, 4, 5, 6, 1, 2]
+        accesses = [Access(x, 1) for x in list]
+        rrip = HP_SRRIP(4, 3)
+        for access in accesses:
             rrip.push(access)
         rrip.flush()
-        self.assertEqual(rrip.hits, 2)
-        self.assertEqual(rrip.misses, 8)
+        self.assertEqual(rrip.hits, 4)
+        self.assertEqual(rrip.misses, 6)
+
+    def test_disparate(self):
+        # Test LRU failing
+        per_length = 2**12
+        number_of_streams = 3
+        lru = LRU(per_length)
+        readers = [item for sublist in [generate_access_pattern("sr", 0, 2**32, per_length) for x in range(number_of_streams)] for item in sublist]
+        for access in readers:
+            lru.push(access)
+        lru.flush()
+        self.assertEqual(lru.hits, 0)
+        self.assertEqual(lru.misses, per_length * number_of_streams)
+
+    def test_non_disparate(self):
+        # Test LRU succeeding
+        per_length = 2**12
+        number_of_streams = 3
+        lru = LRU(per_length)
+        readers = [item for sublist in [generate_access_pattern("sr", per_length, per_length * 2, per_length) for x in range(number_of_streams)] for item in sublist]
+        for access in readers:
+            lru.push(access)
+        lru.flush()
+        self.assertEqual(per_length * (number_of_streams - 1), lru.hits)
+        self.assertEqual(per_length, lru.misses)
 
 
 import argparse as ap
 import csv
 
+# sequential r/w in a good region, with a scan in a bad, and then sequential in a good
+def scanning_pattern(scan_length, cacheable_length, cacheable_iterations, atype="sr"):
+    return it.chain(
+        it.repeat(generate_pattern(atype, 0, cacheable_length), cacheable_iterations),
+        generate_pattern(atype, cacheable_length + 1, scan_length + cacheable_length),
+        it.repeat(generate_pattern(atype, 0, cacheable_length), cacheable_iterations),
+    )
+
+from tqdm import tqdm
+def run_tests(test_head):
+    print("Synthesizing input...")
+    stream = scanning_pattern(10**9, 10**9 // 2, 5)
+    print("Running test...")
+    for access in tqdm(stream):
+        stream.push(access)
+
 if __name__ == "__main__":
     parser = ap.ArgumentParser(description='Simulate a simple cache ')
     parser.add_argument('source', metavar='S', type=str, nargs=ap.REMAINDER)
     args = parser.parse_args()
-    if len(args.source) == 0:
-        print("No path, running tests instead")
-        ut.main()
-    else:
-        source = args.source
-        print("Simulating from {}".format(source))
-        # csv: r/w? address / file ID (arbitrary), size, (offset?)
+    #if len(args.source) == 0:
+        #print("No path, running tests instead")
+        #ut.main()
 
+    block_size = 4096
 
+    nvm_blocks = 2 * (10**9) // block_size
+    ssd_blocks = 280 * (10**9) // block_size
 
+    nvm = LRU(nvm_blocks)
+    ssd = LRU(ssd_blocks)
+    nvm.child = ssd
+
+    run_tests(nvm)
